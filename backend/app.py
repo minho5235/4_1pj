@@ -1,52 +1,38 @@
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import cv2
-import dlib
 import numpy as np
 from PIL import Image
 import mediapipe as mp
-import requests
 import os
+import requests
 
 # Flask app 설정
 app = Flask(__name__)
 CORS(app)
 
-# 얼굴 탐지기 및 랜드마크 예측기 초기화
-
-detector = dlib.get_frontal_face_detector()
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-predictor_path = os.path.join(BASE_DIR, "shape_predictor_68_face_landmarks.dat")
-NAVER_CLIENT_ID = "lBn8efDv2ADZj1HAtP94"
-NAVER_CLIENT_SECRET = "yD8do1gkuj"
-
-try:
-    predictor = dlib.shape_predictor(predictor_path)
-except RuntimeError as e:
-    print(f"Error loading shape predictor: {e}")
-    predictor = None
+# Mediapipe 얼굴 탐지기 및 랜드마크 예측기 초기화
+mp_face_mesh = mp.solutions.face_mesh
+face_mesh = mp_face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1, min_detection_confidence=0.5)
 
 # Mediapipe pose 초기화
 mp_pose = mp.solutions.pose
 pose = mp_pose.Pose(static_image_mode=True)
 
-# 얼굴 특징 추출 함수
+# 얼굴 특징 추출 함수 (mediapipe 사용)
 def extract_face_features(image_data):
-    if predictor is None:
-        return "Error: Predictor not loaded", None
-
     img = Image.open(image_data).convert("RGB")
     img_np = np.array(img, dtype=np.uint8)
-    gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
+    img_rgb = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
 
-    faces = detector(gray)
-    if len(faces) == 0:
+    # 얼굴 랜드마크 추출
+    results = face_mesh.process(img_rgb)
+
+    if results.multi_face_landmarks is None:
         return "No face detected", None
 
-    features = []
-    for face in faces:
-        landmarks = predictor(gray, face)
-        features.append(landmarks)
+    face_landmarks = results.multi_face_landmarks[0]  # 첫 번째 얼굴의 랜드마크만 추출
+    features = [(landmark.x, landmark.y, landmark.z) for landmark in face_landmarks.landmark]
 
     return None, features
 
@@ -211,8 +197,6 @@ def recommend_body_style(body_shape):
         "bottoms": ["기본 스타일 추천."]
     })
 
-import requests
-
 def get_clothes_by_price_range(min_price, max_price, body_style):
     # 네이버 쇼핑 API URL
     url = "https://openapi.naver.com/v1/search/shop.json"
@@ -307,4 +291,4 @@ def recommend_style_endpoint():
         return jsonify({'error': str(e)})
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=False)
