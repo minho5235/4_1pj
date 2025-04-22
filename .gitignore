@@ -1,0 +1,12 @@
+# Python 가상환경
+/backend/venv/
+
+# Node.js 관련 파일
+/frontend/node_modules/
+
+# 기타 불필요한 파일들
+*.log
+*.pyc
+*.pyo
+*.pyd
+__pycache__
