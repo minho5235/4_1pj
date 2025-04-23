@@ -11,32 +11,32 @@ import requests
 app = Flask(__name__)
 CORS(app)
 
-# Mediapipe 얼굴 탐지기 및 랜드마크 예측기 초기화
+# Mediapipe 초기화
 mp_face_mesh = mp.solutions.face_mesh
 face_mesh = mp_face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1, min_detection_confidence=0.5)
 
-# Mediapipe pose 초기화
 mp_pose = mp.solutions.pose
 pose = mp_pose.Pose(static_image_mode=True)
 
-# 얼굴 특징 추출 함수 (mediapipe 사용)
+# 네이버 API 정보
+NAVER_CLIENT_ID = "lBn8efDv2ADZj1HAtP94"
+NAVER_CLIENT_SECRET = "yD8do1gkuj"
+
+# 얼굴 특징 추출
 def extract_face_features(image_data):
     img = Image.open(image_data).convert("RGB")
     img_np = np.array(img, dtype=np.uint8)
     img_rgb = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
 
-    # 얼굴 랜드마크 추출
     results = face_mesh.process(img_rgb)
-
     if results.multi_face_landmarks is None:
         return "No face detected", None
 
-    face_landmarks = results.multi_face_landmarks[0]  # 첫 번째 얼굴의 랜드마크만 추출
+    face_landmarks = results.multi_face_landmarks[0]
     features = [(landmark.x, landmark.y, landmark.z) for landmark in face_landmarks.landmark]
-
     return None, features
 
-# 얼굴형 분석
+# 얼굴형 판단
 def determine_face_shape(jaw_width, face_height, forehead_width, cheekbone_width):
     aspect_ratio = face_height / cheekbone_width
     if aspect_ratio > 1.4 and forehead_width > jaw_width:
@@ -61,7 +61,7 @@ def determine_face_shape(jaw_width, face_height, forehead_width, cheekbone_width
         else:
             return "Oval"
 
-# 얼굴형 기반 스타일 추천
+# 얼굴형 스타일 추천
 def recommend_style(face_shape):
     recommendations = {
         "Oval": {
@@ -107,16 +107,21 @@ def recommend_style(face_shape):
         "hat": ["기본 스타일 추천."]
     })
 
-# 얼굴 분석 및 스타일 추천
+# 얼굴형 기반 추천
 def recommend_clothes(face_features):
     if not face_features:
         return "No face detected", {}
 
-    landmarks = face_features[0]
-    jaw_width = landmarks.part(16).x - landmarks.part(0).x
-    face_height = landmarks.part(8).y - landmarks.part(27).y
-    forehead_width = landmarks.part(26).x - landmarks.part(17).x
-    cheekbone_width = landmarks.part(14).x - landmarks.part(2).x
+    # placeholder 수치 (dlib 기반 코드의 잔재)
+    # 실제 landmark index를 기준으로 계산이 필요
+    # 여기는 적절히 수정해주는 것이 좋음
+    landmarks = face_features
+
+    # 단순한 예시 수치로 계산
+    jaw_width = landmarks[16][0] - landmarks[0][0]
+    face_height = landmarks[8][1] - landmarks[27][1]
+    forehead_width = landmarks[26][0] - landmarks[17][0]
+    cheekbone_width = landmarks[14][0] - landmarks[2][0]
 
     face_shape = determine_face_shape(jaw_width, face_height, forehead_width, cheekbone_width)
     recommended_style = recommend_style(face_shape)
@@ -124,10 +129,8 @@ def recommend_clothes(face_features):
 
 # 체형 분석
 def analyze_body_shape(image_np):
-    print("[INFO] Analyzing body shape...")
     results = pose.process(cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR))
     if not results.pose_landmarks:
-        print("[WARNING] No body landmarks detected.")
         return None
 
     landmarks = results.pose_landmarks.landmark
@@ -137,13 +140,10 @@ def analyze_body_shape(image_np):
     torso = abs(landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER].y - landmarks[mp_pose.PoseLandmark.LEFT_HIP].y)
     leg = abs(landmarks[mp_pose.PoseLandmark.LEFT_HIP].y - landmarks[mp_pose.PoseLandmark.LEFT_ANKLE].y)
 
-    print(f"[DEBUG] Shoulder: {shoulder:.3f}, Hip: {hip:.3f}, Waist: {waist:.3f}, Torso: {torso:.3f}, Leg: {leg:.3f}")
-
     ratio_shoulder_hip = shoulder / hip if hip > 0 else 0
     ratio_waist_shoulder = waist / shoulder if shoulder > 0 else 0
     ratio_torso_leg = torso / leg if leg > 0 else 0
 
-    # 새로운 조건 추가
     if ratio_shoulder_hip >= 1.2:
         return "Inverted Triangle"
     elif ratio_shoulder_hip <= 0.8:
@@ -159,6 +159,7 @@ def analyze_body_shape(image_np):
     else:
         return "Undefined"
 
+# 체형 스타일 추천
 def recommend_body_style(body_shape):
     recommendations = {
         "Inverted Triangle": {
@@ -196,11 +197,9 @@ def recommend_body_style(body_shape):
         "bottoms": ["기본 스타일 추천."]
     })
 
+# 네이버 상품 API 검색
 def get_clothes_by_price_range(min_price, max_price, body_style):
-    # 네이버 쇼핑 API URL
     url = "https://openapi.naver.com/v1/search/shop.json"
-
-    # 네이버 API 인증 헤더
     headers = {
         "X-Naver-Client-Id": NAVER_CLIENT_ID,
         "X-Naver-Client-Secret": NAVER_CLIENT_SECRET,
@@ -218,13 +217,12 @@ def get_clothes_by_price_range(min_price, max_price, body_style):
             params = {
                 "query": query,
                 "start": 1,
-                "display": 1,  # 각 항목당 1개씩만 결과 가져오기
+                "display": 1,
                 "min_price": min_price,
                 "max_price": max_price,
             }
 
             response = requests.get(url, headers=headers, params=params)
-
             try:
                 item = response.json()["items"][0]
                 results.append({
@@ -241,17 +239,16 @@ def get_clothes_by_price_range(min_price, max_price, body_style):
 
     return results
 
-# React 빌드된 파일 서빙
+# React 정적 파일 서비스
 @app.route('/')
 def serve_react_app():
-    return send_from_directory(os.path.join(app.root_path, 'frontend/my-app/build'), 'index.html')
+    return send_from_directory(os.path.join(app.root_path, 'frontend1/build'), 'index.html')
 
 @app.route('/<path:path>')
 def serve_static(path):
-    return send_from_directory(os.path.join(app.root_path, 'frontend/my-app/build'), path)
+    return send_from_directory(os.path.join(app.root_path, 'frontend1/build'), path)
 
-
-# API 엔드포인트
+# 추천 API
 @app.route('/get_recommendation', methods=['POST'])
 def recommend_style_endpoint():
     try:
@@ -261,19 +258,14 @@ def recommend_style_endpoint():
         min_price = int(request.form.get('min_price', 10000))
         max_price = int(request.form.get('max_price', 50000))
 
-        # 얼굴 분석
         error, face_features = extract_face_features(image_file)
         face_shape, style_recommendation = None, {}
         if face_features:
             face_shape, style_recommendation = recommend_clothes(face_features)
 
-        # 체형 분석
         body_shape = analyze_body_shape(image_np)
-
-        # 스타일 추천 추가
         body_style = recommend_body_style(body_shape) if body_shape else {}
 
-        # 네이버 상품 추천
         items = get_clothes_by_price_range(min_price, max_price, body_style)
 
         result = {
