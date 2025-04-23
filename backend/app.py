@@ -159,7 +159,6 @@ def analyze_body_shape(image_np):
     else:
         return "Undefined"
 
-
 def recommend_body_style(body_shape):
     recommendations = {
         "Inverted Triangle": {
