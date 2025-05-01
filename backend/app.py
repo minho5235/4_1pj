@@ -111,9 +111,7 @@ def recommend_style(face_shape):
 def recommend_clothes(face_features):
     if not face_features:
         return "No face detected", {}
-
-    # placeholder 수치 (dlib 기반 코드의 잔재)
-    # 실제 landmark index를 기준으로 계산이 필요
+    
     # 여기는 적절히 수정해주는 것이 좋음
     landmarks = face_features
 
