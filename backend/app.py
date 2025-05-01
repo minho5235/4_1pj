@@ -6,6 +6,7 @@ from PIL import Image
 import mediapipe as mp
 import os
 import requests
+import time
 
 # Flask app 설정
 app = Flask(__name__)
@@ -127,42 +128,59 @@ def recommend_clothes(face_features):
 
 # 체형 분석
 def analyze_body_shape(image_np):
+    # 1) Pose 랜드마크 획득
     results = pose.process(cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR))
     if not results.pose_landmarks:
         return None
+    lm = results.pose_landmarks.landmark
 
-    landmarks = results.pose_landmarks.landmark
-    shoulder = abs(landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER].x - landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER].x)
-    hip = abs(landmarks[mp_pose.PoseLandmark.LEFT_HIP].x - landmarks[mp_pose.PoseLandmark.RIGHT_HIP].x)
-    waist = abs(landmarks[mp_pose.PoseLandmark.LEFT_HIP].x - landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER].x)
-    torso = abs(landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER].y - landmarks[mp_pose.PoseLandmark.LEFT_HIP].y)
-    leg = abs(landmarks[mp_pose.PoseLandmark.LEFT_HIP].y - landmarks[mp_pose.PoseLandmark.LEFT_ANKLE].y)
+    # 2) normalized 좌표 차이로 폭/길이 계산
+    shoulder = abs(lm[mp_pose.PoseLandmark.LEFT_SHOULDER].x  - lm[mp_pose.PoseLandmark.RIGHT_SHOULDER].x)
+    hip      = abs(lm[mp_pose.PoseLandmark.LEFT_HIP].x       - lm[mp_pose.PoseLandmark.RIGHT_HIP].x)
+    waist    = abs(lm[mp_pose.PoseLandmark.LEFT_HIP].x       - lm[mp_pose.PoseLandmark.LEFT_SHOULDER].x)
+    torso    = abs(lm[mp_pose.PoseLandmark.LEFT_SHOULDER].y  - lm[mp_pose.PoseLandmark.LEFT_HIP].y)
+    leg      = abs(lm[mp_pose.PoseLandmark.LEFT_HIP].y       - lm[mp_pose.PoseLandmark.LEFT_ANKLE].y)
 
-    ratio_shoulder_hip = shoulder / hip if hip > 0 else 0
-    ratio_waist_shoulder = waist / shoulder if shoulder > 0 else 0
-    ratio_torso_leg = torso / leg if leg > 0 else 0
+    # 3) 주요 비율 계산
+    r_sh = shoulder / hip      if hip      > 0 else 0   # 어깨/엉덩이
+    r_ws = waist   / shoulder if shoulder > 0 else 0   # 허리/어깨
+    r_wh = waist   / hip      if hip      > 0 else 0   # 허리/엉덩이
+    r_tl = torso   / leg      if leg      > 0 else 0   # 토르소/다리
 
-    if ratio_shoulder_hip >= 1.2:
-        return "Inverted Triangle"
-    elif ratio_shoulder_hip <= 0.8:
+    # 4) 우선순위 분류 (요청한 3가지 케이스)
+    if r_ws < 0.05:
+        return "Hourglass"            # 3번째 사진
+    elif r_tl > 0.7:
+        return "Apple"                # 2번째 사진
+    elif r_sh > 1.5:
+        return "Inverted Triangle"    # 1번째 사진
+
+    # 5) 나머지 원래 체형들 분류
+    if r_sh <= 0.8:
         return "Pear"
-    elif 0.95 <= ratio_shoulder_hip <= 1.05 and ratio_waist_shoulder <= 0.7:
+    elif abs(r_sh - 1) <= 0.1 and r_ws <= 0.8:
         return "Hourglass"
-    elif 0.95 <= ratio_shoulder_hip <= 1.05:
+    elif abs(r_sh - 1) <= 0.1 and 0.8 < r_ws <= 1.1:
         return "Rectangle"
-    elif ratio_torso_leg >= 1.0:
+    elif r_wh >= 1.1 and 0.8 < r_sh < 1.2:
+        return "Lollipop"
+    elif abs(r_sh - 1) <= 0.2 and 0.8 < r_wh < 1.1:
+        return "Diamond"
+    elif r_tl >= 1.1:
         return "Oval"
-    elif ratio_waist_shoulder >= 0.9:
-        return "Apple"
     else:
         return "Undefined"
 
-# 체형 스타일 추천
+    
 def recommend_body_style(body_shape):
     recommendations = {
         "Inverted Triangle": {
             "tops": ["심플한 상의", "브이넥 티셔츠", "어두운 컬러 블라우스"],
             "bottoms": ["밝은 색 하의", "플레어 스커트", "와이드 팬츠"]
+        },
+        "Apple": {
+            "tops": ["랩 블라우스", "엠파이어 웨이스트 원피스", "브이넥 롱 가디건"],
+            "bottoms": ["하이웨이스트 스트레이트 진", "A라인 미디 스커트", "슬림 테이퍼드 팬츠"]
         },
         "Pear": {
             "tops": ["퍼프 소매 블라우스", "숄더 디테일 탑", "밝은 색 셔츠"],
@@ -189,7 +207,6 @@ def recommend_body_style(body_shape):
             "bottoms": ["밑단 넓은 팬츠", "스트레이트 스커트", "밝은 컬러 하의"]
         }
     }
-
     return recommendations.get(body_shape, {
         "tops": ["기본 스타일 추천."],
         "bottoms": ["기본 스타일 추천."]
@@ -197,6 +214,7 @@ def recommend_body_style(body_shape):
 
 # 네이버 상품 API 검색
 def get_clothes_by_price_range(min_price, max_price, body_style):
+
     url = "https://openapi.naver.com/v1/search/shop.json"
     headers = {
         "X-Naver-Client-Id": NAVER_CLIENT_ID,
@@ -212,27 +230,47 @@ def get_clothes_by_price_range(min_price, max_price, body_style):
 
     for category, items in queries.items():
         for query in items:
-            params = {
-                "query": query,
-                "start": 1,
-                "display": 1,
-                "min_price": min_price,
-                "max_price": max_price,
-            }
+            start = 1
+            matched_item = None
 
-            response = requests.get(url, headers=headers, params=params)
-            try:
-                item = response.json()["items"][0]
+            while start <= 50:  
+                params = {
+                    "query": query,
+                    "start": start,
+                    "display": 1
+                }
+
+                response = requests.get(url, headers=headers, params=params)
+
+                try:
+                    item_list = response.json().get("items", [])
+                    if not item_list:
+                        break  # 더 이상 상품이 없으면 종료
+
+                    item = item_list[0]
+                    price = int(item.get("lprice", 0))
+
+                    if min_price <= price <= max_price:
+                        matched_item = item
+                        break
+
+                    start += 1
+                    time.sleep(0.1)  # 과도한 요청 방지용 딜레이
+                except Exception as e:
+                    matched_item = {"error": f"API 에러: {str(e)}"}
+                    break
+
+            if matched_item:
                 results.append({
                     "category": category,
                     "query": query,
-                    "item": item
+                    "item": matched_item
                 })
-            except (KeyError, IndexError):
+            else:
                 results.append({
                     "category": category,
                     "query": query,
-                    "item": {"error": "상품을 찾을 수 없습니다."}
+                    "item": {"error": "해당 가격대의 상품이 없습니다."}
                 })
 
     return results
