@@ -213,7 +213,7 @@ def recommend_body_style(body_shape):
     })
 
 # 네이버 상품 API 검색
-def get_clothes_by_price_range(min_price, max_price, body_style):
+def get_clothes_by_price_range(min_price, max_price, body_style, purpose=None):
 
     url = "https://openapi.naver.com/v1/search/shop.json"
     headers = {
@@ -229,7 +229,8 @@ def get_clothes_by_price_range(min_price, max_price, body_style):
     results = []
 
     for category, items in queries.items():
-        for query in items:
+        for base_query in items:
+            query = f"{purpose} {base_query}" if purpose else base_query
             start = 1
             matched_item = None
 
@@ -293,6 +294,7 @@ def recommend_style_endpoint():
         image_np = np.array(image_pil)
         min_price = int(request.form.get('min_price', 10000))
         max_price = int(request.form.get('max_price', 50000))
+        purpose = request.form.get('purpose', '').strip()
 
         error, face_features = extract_face_features(image_file)
         face_shape, style_recommendation = None, {}
@@ -302,7 +304,7 @@ def recommend_style_endpoint():
         body_shape = analyze_body_shape(image_np)
         body_style = recommend_body_style(body_shape) if body_shape else {}
 
-        items = get_clothes_by_price_range(min_price, max_price, body_style)
+        items = get_clothes_by_price_range(min_price, max_price, body_style, purpose)
 
         result = {
             'face_shape': face_shape,
